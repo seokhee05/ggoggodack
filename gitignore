@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+pose_landmarker_full.task
+hand_landmarker.task
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
