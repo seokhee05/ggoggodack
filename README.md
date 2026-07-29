@@ -1,233 +1,220 @@
-# MediaPipe Pose & Hand Tracking
+# Real-Time Pose & Hand Tracking
 
-웹캠 영상을 이용하여 사람의 전신 포즈와 손가락 관절을 실시간으로 검출하고 화면에 표시하는 Python 프로그램입니다.
+OpenCV와 MediaPipe Tasks를 사용하여 웹캠 영상에서 여러 사람의 전신 포즈와 손 랜드마크를 실시간으로 추적하는 Python 프로젝트입니다.
 
-## 주요 기능
+각 신체 부위와 손가락을 서로 다른 색상으로 시각화하며, 현재 감지된 사람과 손의 개수를 화면에 표시합니다.
 
-* 웹캠 영상 실시간 입력
-* 최대 4명의 전신 포즈 검출
-* 사람당 33개의 포즈 랜드마크 표시
-* 최대 8개의 손 검출
-* 손당 21개의 손가락 랜드마크 표시
-* 신체 부위와 손가락별 색상 구분
-* 감지된 사람과 손 개수 표시
-* 필요한 MediaPipe 모델 자동 다운로드
+## Features
 
-## 개발 환경
+* 실시간 웹캠 영상 처리
+* 최대 4명의 전신 포즈 동시 추적
+* 사람당 33개의 포즈 랜드마크 검출
+* 최대 8개의 손 동시 추적
+* 손당 21개의 손 랜드마크 검출
+* 신체 부위별 랜드마크 색상 구분
+* 손가락별 랜드마크 색상 구분
+* 감지된 사람 및 손 개수 표시
+* MediaPipe 모델 파일 자동 다운로드
+* Windows, macOS 및 Linux 지원
 
-* 개발 언어: Python
-* 권장 Python 버전: Python 3.11
-* 지원 Python 버전: Python 3.9~3.12
-* 주요 라이브러리:
+## Tech Stack
 
-  * MediaPipe
-  * OpenCV
-* 입력 장치: 웹캠
-* 지원 운영체제:
+| 구분              | 사용 기술                     |
+| --------------- | ------------------------- |
+| Language        | Python                    |
+| Computer Vision | OpenCV                    |
+| Pose Estimation | MediaPipe Pose Landmarker |
+| Hand Tracking   | MediaPipe Hand Landmarker |
+| Input           | Webcam                    |
 
-  * Windows
-  * macOS
-  * Linux
+## Requirements
 
-## 프로젝트 파일 구성
+프로그램을 실행하려면 다음 환경이 필요합니다.
 
-GitHub 저장소에는 다음 파일이 포함되어 있습니다.
+* Python 3.9 이상
+* Python 3.11 권장
+* pip 20.3 이상
+* 웹캠
+* 최초 실행 시 인터넷 연결
 
-```text
-project/
-├── test.py
-├── requirements.txt
-└── README.md
-```
+## Installation
 
-프로그램을 처음 실행하면 다음 모델 파일이 자동으로 다운로드됩니다.
+### 1. Repository Clone
 
-```text
-project/
-├── test.py
-├── requirements.txt
-├── README.md
-├── pose_landmarker_full.task
-└── hand_landmarker.task
-```
-
-## 설치 방법
-
-### 1. Python 설치
-
-Python이 설치되어 있지 않다면 아래 공식 사이트에서 Python을 설치합니다.
-
-* https://www.python.org/downloads/
-
-Python 3.11 버전을 권장합니다.
-
-Windows에서 Python을 설치할 때 반드시 다음 항목을 체크합니다.
-
-```text
-Add python.exe to PATH
-```
-
-### 2. 프로젝트 다운로드
-
-GitHub 저장소 상단의 다음 메뉴를 선택합니다.
-
-```text
-Code → Download ZIP
-```
-
-다운로드한 ZIP 파일의 압축을 해제합니다.
-
-Git이 설치되어 있다면 다음 명령어로 저장소를 받을 수도 있습니다.
+다음 명령어를 사용하여 저장소를 내려받습니다.
 
 ```bash
-git clone 저장소주소
+git clone https://github.com/seokhee05/ggoggodack.git
+cd ggoggodack
 ```
 
-예시:
+Git을 사용하지 않는 경우 저장소 상단의 `Code → Download ZIP`을 선택한 후 압축을 해제할 수 있습니다.
+
+### 2. Virtual Environment
+
+프로젝트별 패키지 충돌을 방지하기 위해 가상환경 사용을 권장합니다.
+
+#### Windows
 
 ```bash
-git clone https://github.com/사용자이름/저장소이름.git
+py -3.11 -m venv .venv
+.venv\Scripts\activate
 ```
 
-그다음 프로젝트 폴더로 이동합니다.
+#### macOS / Linux
 
 ```bash
-cd 저장소이름
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-### 3. 터미널 열기
+### 3. Install Dependencies
 
-`test.py`와 `requirements.txt`가 들어 있는 프로젝트 폴더에서 터미널을 엽니다.
-
-VS Code를 사용하는 경우:
-
-```text
-터미널 → 새 터미널
-```
-
-Windows에서는 프로젝트 폴더의 빈 공간에서 마우스 오른쪽 버튼을 누른 후 다음을 선택해도 됩니다.
-
-```text
-터미널에서 열기
-```
-
-### 4. 필요한 라이브러리 설치
-
-프로젝트 폴더에서 다음 명령어를 실행합니다.
+다음 명령어를 사용하여 필요한 Python 라이브러리를 한 번에 설치합니다.
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Windows에서 `python` 명령어가 작동하지 않는 경우 다음 명령어를 사용합니다.
+## Usage
 
-```bash
-py -m pip install -r requirements.txt
-```
-
-## 프로그램 실행
-
-라이브러리 설치가 완료되면 다음 명령어를 실행합니다.
+프로젝트 폴더에서 다음 명령어를 실행합니다.
 
 ```bash
 python test.py
 ```
 
-Windows에서 `python` 명령어가 작동하지 않는 경우:
+Windows에서 `python` 명령어가 인식되지 않는 경우 다음 명령어를 사용합니다.
 
 ```bash
 py test.py
 ```
 
-처음 실행할 때 다음 MediaPipe 모델 파일이 자동으로 다운로드됩니다.
+프로그램을 처음 실행하면 다음 MediaPipe 모델 파일이 자동으로 다운로드됩니다.
 
-* `pose_landmarker_full.task`
-* `hand_landmarker.task`
-
-따라서 최초 실행 시에는 인터넷 연결이 필요합니다.
-
-## 사용 방법
-
-프로그램을 실행하면 웹캠 화면이 열리고 다음 정보가 표시됩니다.
-
-* 사람의 전신 관절
-* 손과 손가락 관절
-* 감지된 사람 수
-* 감지된 손 수
-
-프로그램을 종료하려면 웹캠 영상 창을 클릭한 후 키보드의 `Q` 키를 누릅니다.
-
-## 가상환경 사용 방법
-
-다른 Python 프로젝트와 라이브러리가 충돌하는 것을 방지하려면 가상환경 사용을 권장합니다.
-
-### Windows
-
-가상환경을 생성합니다.
-
-```bash
-py -3.11 -m venv .venv
+```text
+pose_landmarker_full.task
+hand_landmarker.task
 ```
 
-가상환경을 활성화합니다.
+모델 파일은 `test.py`와 동일한 디렉터리에 저장되며, 이후 실행부터는 다시 다운로드하지 않습니다.
 
-```bash
-.venv\Scripts\activate
+프로그램을 종료하려면 OpenCV 영상 창을 클릭한 후 `Q` 키를 누릅니다.
+
+## Project Structure
+
+```text
+ggoggodack/
+├── test.py                      # 실시간 포즈 및 손 추적 프로그램
+├── requirements.txt             # Python 패키지 목록
+├── README.md                    # 프로젝트 설명
+├── pose_landmarker_full.task    # 최초 실행 시 자동 다운로드
+└── hand_landmarker.task         # 최초 실행 시 자동 다운로드
 ```
 
-필요한 라이브러리를 설치합니다.
+`.task` 모델 파일은 최초 실행 시 자동으로 생성되므로 GitHub 저장소에 직접 업로드하지 않아도 됩니다.
 
-```bash
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+## How It Works
+
+프로그램은 웹캠에서 프레임을 읽은 후 다음 순서로 처리합니다.
+
+1. OpenCV를 이용하여 웹캠 프레임을 가져옵니다.
+2. 입력 영상을 BGR 형식에서 RGB 형식으로 변환합니다.
+3. RGB 영상을 MediaPipe 이미지 객체로 변환합니다.
+4. Pose Landmarker를 사용하여 전신 랜드마크를 검출합니다.
+5. Hand Landmarker를 사용하여 손 랜드마크를 검출합니다.
+6. 검출된 랜드마크와 관절 연결선을 영상 위에 표시합니다.
+7. 감지된 사람과 손의 개수를 화면에 출력합니다.
+
+## Default Configuration
+
+기본 검출 설정은 다음과 같습니다.
+
+| 설정                   |    기본값 | 설명              |
+| -------------------- | -----: | --------------- |
+| Camera index         |    `0` | 사용할 웹캠 번호       |
+| Frame width          | `1280` | 입력 영상 너비        |
+| Frame height         |  `720` | 입력 영상 높이        |
+| Maximum poses        |    `4` | 동시에 검출할 최대 사람 수 |
+| Maximum hands        |    `8` | 동시에 검출할 최대 손 수  |
+| Detection confidence |  `0.5` | 최소 검출 신뢰도       |
+| Tracking confidence  |  `0.5` | 최소 추적 신뢰도       |
+| Presence confidence  |  `0.5` | 최소 랜드마크 존재 신뢰도  |
+
+## Configuration
+
+### Camera 변경
+
+기본 카메라는 `0`번으로 설정되어 있습니다.
+
+```python
+cap = cv2.VideoCapture(0)
 ```
 
-프로그램을 실행합니다.
+외장 웹캠 등 다른 카메라를 사용하려면 값을 `1` 또는 `2`로 변경합니다.
 
-```bash
-python test.py
+```python
+cap = cv2.VideoCapture(1)
 ```
 
-### macOS 및 Linux
+### Resolution 변경
 
-가상환경을 생성합니다.
+기본 해상도는 1280×720입니다.
 
-```bash
-python3 -m venv .venv
+```python
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 ```
 
-가상환경을 활성화합니다.
+실행 속도가 느린 경우 해상도를 640×480으로 낮출 수 있습니다.
 
-```bash
-source .venv/bin/activate
+```python
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 ```
 
-필요한 라이브러리를 설치합니다.
+### Maximum Detection Count 변경
 
-```bash
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+동시에 검출할 사람과 손의 최대 개수를 변경할 수 있습니다.
+
+```python
+num_poses=4
+num_hands=8
 ```
 
-프로그램을 실행합니다.
+검출 개수를 줄이면 시스템에 따라 처리 속도가 향상될 수 있습니다.
 
-```bash
-python test.py
+## Dependencies
+
+`requirements.txt`에는 다음 외부 라이브러리가 포함됩니다.
+
+```text
+mediapipe
+opencv-python
 ```
 
-## 오류 해결
+다음 모듈은 Python 표준 라이브러리이므로 별도로 설치하지 않습니다.
 
-### `python` 명령어를 찾을 수 없는 경우
+* `os`
+* `time`
+* `urllib.request`
 
-Python이 설치되어 있는지 확인하고, Windows에서는 설치할 때 다음 옵션을 체크했는지 확인합니다.
+## Troubleshooting
+
+### Python 명령어를 찾을 수 없는 경우
+
+Python이 설치되어 있는지 확인합니다.
+
+Windows에서 Python을 설치할 때 다음 옵션을 선택해야 합니다.
 
 ```text
 Add python.exe to PATH
 ```
 
-Python 설치 후에는 기존 터미널을 닫고 새로 열어야 합니다.
+설치가 끝난 후 기존 터미널을 닫고 새 터미널을 실행합니다.
 
-### `No module named 'cv2'` 오류
+### `No module named 'cv2'`
 
 다음 명령어를 실행합니다.
 
@@ -235,7 +222,7 @@ Python 설치 후에는 기존 터미널을 닫고 새로 열어야 합니다.
 python -m pip install opencv-python
 ```
 
-### `No module named 'mediapipe'` 오류
+### `No module named 'mediapipe'`
 
 다음 명령어를 실행합니다.
 
@@ -243,43 +230,54 @@ python -m pip install opencv-python
 python -m pip install mediapipe
 ```
 
-### 웹캠 화면이 열리지 않는 경우
+### Webcam을 열 수 없는 경우
 
-다른 프로그램이 웹캠을 사용하고 있는지 확인합니다.
+다음 항목을 확인합니다.
 
-Windows에서는 다음 설정을 확인합니다.
+* 다른 프로그램에서 웹캠을 사용하고 있는지 확인
+* 운영체제의 카메라 접근 권한 확인
+* `cv2.VideoCapture(0)`의 카메라 번호 변경
+* 외장 웹캠 연결 상태 확인
+
+Windows에서는 다음 위치에서 카메라 권한을 확인할 수 있습니다.
 
 ```text
 설정 → 개인정보 및 보안 → 카메라
 ```
 
-Python 또는 데스크톱 앱의 카메라 접근을 허용해야 합니다.
+### Model 다운로드에 실패하는 경우
 
-카메라 번호가 다른 경우 `test.py`의 다음 코드를 확인합니다.
+최초 실행 시 모델 파일을 다운로드하려면 인터넷 연결이 필요합니다.
 
-```python
-cap = cv2.VideoCapture(0)
-```
+프로젝트 폴더에 크기가 0KB인 `.task` 파일이 생성된 경우 해당 파일을 삭제하고 프로그램을 다시 실행합니다.
 
-`0`을 `1` 또는 `2`로 변경하여 다시 실행합니다.
+### 프로그램이 느리게 실행되는 경우
 
-```python
-cap = cv2.VideoCapture(1)
-```
+다음 방법을 사용할 수 있습니다.
 
-### 모델 다운로드에 실패하는 경우
+* 영상 해상도를 640×480으로 변경
+* `num_poses` 값 감소
+* `num_hands` 값 감소
+* 다른 카메라 및 백그라운드 프로그램 종료
 
-인터넷 연결과 방화벽 설정을 확인합니다.
+## Model Information
 
-프로젝트 폴더에 크기가 0KB인 `.task` 파일이 생성되었다면 해당 파일을 삭제한 후 프로그램을 다시 실행합니다.
+이 프로젝트는 MediaPipe에서 제공하는 다음 모델을 사용합니다.
 
-## requirements.txt
+* Pose Landmarker Full
+* Hand Landmarker
 
-이 프로젝트에서 사용하는 외부 Python 라이브러리는 다음과 같습니다.
+모델은 프로그램 최초 실행 시 MediaPipe 모델 저장소에서 자동으로 다운로드됩니다.
 
-```text
-mediapipe
-opencv-python
-```
+## Notes
 
-`os`, `time`, `urllib.request`는 Python에 기본으로 포함된 표준 라이브러리이므로 별도로 설치하지 않습니다.
+* 카메라 영상은 로컬 컴퓨터에서 처리됩니다.
+* 검출 정확도와 실행 속도는 카메라 품질, 조명, 사람과 카메라 사이의 거리 및 컴퓨터 성능에 따라 달라질 수 있습니다.
+* 여러 사람과 여러 손을 동시에 처리하면 단일 대상 처리보다 더 많은 연산이 필요합니다.
+
+## References
+
+* [MediaPipe Tasks](https://ai.google.dev/edge/mediapipe/solutions/tasks)
+* [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
+* [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker)
+* [OpenCV](https://opencv.org/)
