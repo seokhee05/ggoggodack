@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+pose_landmarker_full.task
+hand_landmarker.task
+roi_config.json
+recordings/
+results/
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
