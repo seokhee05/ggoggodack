@@ -40,7 +40,13 @@ cd ggoggodack
 
 ### 2. 전체 개발 환경 자동 설치
 
-압축을 해제한 프로젝트 폴더에서 CMD를 열고 다음 명령을 실행합니다.
+압축을 해제한 프로젝트 폴더에서 PowerShell을 열고 다음 명령을 실행합니다.
+
+```powershell
+.\setup.bat
+```
+
+명령 프롬프트(CMD)를 사용하는 경우에는 다음과 같이 실행할 수도 있습니다.
 
 ```bat
 setup.bat
@@ -59,8 +65,8 @@ setup.bat
 
 ### 3. 프로그램 실행
 
-```bat
-.venv\Scripts\python.exe test.py
+```powershell
+.\.venv\Scripts\python.exe .\test.py
 ```
 
 프로그램을 종료하려면 OpenCV 영상 창을 클릭한 후 `Q` 키를 누릅니다.
