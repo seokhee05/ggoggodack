@@ -1,3 +1,4 @@
-# Python packages required by test.py
+# Python packages required by factory_app.py
 mediapipe
 opencv-python
+pillow

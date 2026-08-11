@@ -3,9 +3,7 @@ venv/
 __pycache__/
 *.py[cod]
 
-pose_landmarker_full.task
-hand_landmarker.task
-roi_config.json
+models/
 recordings/
 results/
 

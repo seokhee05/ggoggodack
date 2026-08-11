@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ==================================================
-echo  Pose and Hand Tracking - Environment Setup
+echo  Armrest Realtime Inspection - Environment Setup
 echo ==================================================
 echo.
 
@@ -65,7 +65,7 @@ echo  Setup completed successfully.
 echo ==================================================
 echo.
 echo Run the program with:
-echo   .venv\Scripts\python.exe test.py
+echo   .venv\Scripts\python.exe factory_app.py
 echo.
 echo Open the project in VS Code with:
 echo   code .
