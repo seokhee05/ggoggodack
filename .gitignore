@@ -1,4 +1,8 @@
 .venv/
+.testvenv/
+pip-metadata-*/
+pip-unpack-*/
+tmp*
 venv/
 __pycache__/
 *.py[cod]

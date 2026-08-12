@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import subprocess
 import time
 import urllib.request
 from datetime import datetime
@@ -22,6 +23,7 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
+from motion_tracker import WorkerMotionTracker, draw_motion_points
 
 
 ROOT = Path(__file__).resolve().parent
@@ -94,6 +96,7 @@ class FactoryApp(tk.Tk):
         self.current_video_path = ""
         self.total = self.passed = self.failed = 0
         self.last_event = "idle"
+        self.motion_tracker = WorkerMotionTracker()
 
         self._build_ui()
         self.after(100, self._start_camera)
@@ -146,6 +149,9 @@ class FactoryApp(tk.Tk):
         tk.Button(buttons, text="현재 박스 강제 종료", font=(FONT, 12, "bold"),
                   bg=RED, fg="white", relief="flat", padx=18, pady=6,
                   command=self._force_finish).pack(side="left", padx=6)
+        tk.Button(buttons, text="저장 영상 검사", font=(FONT, 12, "bold"),
+                  bg=BLUE, fg="white", relief="flat", padx=18, pady=6,
+                  command=self._open_saved_video).pack(side="left", padx=6)
         tk.Button(buttons, text="프로그램 종료", font=(FONT, 12, "bold"),
                   bg=CARD, fg=TEXT, relief="flat", padx=18, pady=6,
                   command=self.on_close).pack(side="left", padx=6)
@@ -289,7 +295,9 @@ class FactoryApp(tk.Tk):
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         hand_result = self.hand_lm.detect_for_video(image, ms)
         hands = self._hand_centers(hand_result, w, h)
+        hands = self.motion_tracker.detect(frame, hands)
         self._draw_hands(frame, hand_result)
+        draw_motion_points(frame, hands)
 
         event = self.engine.update(frame, hands, now)
         if event["event"] != self.last_event:
@@ -360,10 +368,25 @@ class FactoryApp(tk.Tk):
         if messagebox.askyesno("강제 종료", "현재 박스를 NG로 저장할까요?"):
             self._finish_box(forced=True)
 
+    def _open_saved_video(self) -> None:
+        """실시간 카메라를 유지한 채 저장 영상 분석기를 별도 실행한다."""
+        script = ROOT / "saved_video_check.py"
+        subprocess.Popen([sys.executable, str(script)], cwd=str(ROOT))
+
     def _set_status(self, message: str, color: str, sound: bool = False) -> None:
-        self.status_label.config(text=message, fg=color)
+        if sound:
+            self.status_label.config(
+                text=f"⚠ 경고 ⚠   {message}", fg="white", bg=RED,
+                font=(FONT, 22, "bold"), pady=18)
+            self.after(1800, self._restore_status_style)
+        else:
+            self.status_label.config(text=message, fg=color, bg=CARD,
+                                     font=(FONT, 17, "bold"), pady=10)
         if sound:
             alert_sound(self)
+
+    def _restore_status_style(self) -> None:
+        self.status_label.config(bg=CARD, font=(FONT, 17, "bold"), pady=10)
 
     def _update_stats(self) -> None:
         current = self.engine.barcode if self.engine.active else "대기 중"
