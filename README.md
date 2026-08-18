@@ -66,7 +66,7 @@ setup.bat
 
 ## 실행
 
-`run.bat`을 실행하거나 다음 명령을 사용합니다.
+`.\run.bat`을 실행하거나 다음 명령을 사용합니다.
 
 ```bat
 .venv\Scripts\python.exe factory_app.py
