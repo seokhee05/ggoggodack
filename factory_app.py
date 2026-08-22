@@ -23,7 +23,10 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
-from motion_tracker import WorkerMotionTracker, draw_motion_points
+from motion_tracker import (
+    WorkerMotionTracker, draw_hand_skeleton, draw_motion_points,
+    draw_pose_arms, pose_wrist_centers,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -31,9 +34,14 @@ RECORDINGS = ROOT / "recordings"
 RESULTS = ROOT / "results"
 MODELS = ROOT / "models"
 HAND_MODEL = MODELS / "hand_landmarker.task"
+POSE_MODEL = MODELS / "pose_landmarker_lite.task"
 HAND_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
     "hand_landmarker/float16/1/hand_landmarker.task"
+)
+POSE_URL = (
+    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+    "pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
 )
 
 CAMERA_INDEX = 0
@@ -62,9 +70,10 @@ def ensure_model() -> None:
     RECORDINGS.mkdir(exist_ok=True)
     RESULTS.mkdir(exist_ok=True)
     MODELS.mkdir(exist_ok=True)
-    if HAND_MODEL.exists() and HAND_MODEL.stat().st_size > 0:
-        return
-    urllib.request.urlretrieve(HAND_URL, HAND_MODEL)
+    if not (HAND_MODEL.exists() and HAND_MODEL.stat().st_size > 0):
+        urllib.request.urlretrieve(HAND_URL, HAND_MODEL)
+    if not (POSE_MODEL.exists() and POSE_MODEL.stat().st_size > 0):
+        urllib.request.urlretrieve(POSE_URL, POSE_MODEL)
 
 
 def alert_sound(window: tk.Tk) -> None:
@@ -90,6 +99,7 @@ class FactoryApp(tk.Tk):
         self.cap = None
         self.writer = None
         self.hand_lm = None
+        self.pose_lm = None
         self.after_id = None
         self.last_timestamp_ms = -1
         self.engine = InspectionEngine(nominal_seconds=70.0, warning_seconds=18.0)
@@ -138,10 +148,12 @@ class FactoryApp(tk.Tk):
         self.check_labels = []
         checklist = tk.Frame(self, bg=BG)
         checklist.pack(fill="x", padx=34, pady=3)
-        for step in OFFICIAL_STEPS:
+        checklist.grid_columnconfigure(0, weight=1)
+        checklist.grid_columnconfigure(1, weight=1)
+        for index, step in enumerate(OFFICIAL_STEPS):
             label = tk.Label(checklist, text=f"○ {step.label}",
-                             font=(FONT, 12), bg=BG, fg=SUB, anchor="w")
-            label.pack(fill="x")
+                             font=(FONT, 10), bg=BG, fg=SUB, anchor="w")
+            label.grid(row=index // 2, column=index % 2, sticky="ew", padx=5, pady=1)
             self.check_labels.append(label)
 
         buttons = tk.Frame(self, bg=BG)
@@ -182,6 +194,15 @@ class FactoryApp(tk.Tk):
                 min_hand_presence_confidence=0.45,
             )
             self.hand_lm = mp.tasks.vision.HandLandmarker.create_from_options(options)
+            pose_options = mp.tasks.vision.PoseLandmarkerOptions(
+                base_options=mp.tasks.BaseOptions(model_asset_path=str(POSE_MODEL)),
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
+                num_poses=1,
+                min_pose_detection_confidence=0.45,
+                min_pose_presence_confidence=0.45,
+                min_tracking_confidence=0.45,
+            )
+            self.pose_lm = mp.tasks.vision.PoseLandmarker.create_from_options(pose_options)
             self._set_status("카메라 정상 — 바코드를 스캔해 주세요.", GREEN)
             self.barcode_entry.focus_set()
             self._loop()
@@ -235,6 +256,7 @@ class FactoryApp(tk.Tk):
             return "break"
         self.current_video_path = str(video_path)
         self.current_result_path = str(result_path)
+        self.motion_tracker.reset()
         self.engine.start(barcode, time.monotonic())
         self._set_status(f"[{barcode}] 검사 시작 — {OFFICIAL_STEPS[0].label}", GREEN)
         self._refresh_checklist()
@@ -265,7 +287,7 @@ class FactoryApp(tk.Tk):
         step = self.engine.step_index
         cv2.putText(frame, f"PRODUCT: {product}", (16, 31),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
-        cv2.putText(frame, f"CHECKLIST: {step}/7", (16, 64),
+        cv2.putText(frame, f"CHECKLIST: {step}/{len(OFFICIAL_STEPS)}", (16, 64),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.72, (60, 220, 130), 2)
         cv2.putText(frame, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     (w - 290, 31), cv2.FONT_HERSHEY_SIMPLEX, 0.62,
@@ -294,9 +316,19 @@ class FactoryApp(tk.Tk):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         hand_result = self.hand_lm.detect_for_video(image, ms)
+        pose_result = self.pose_lm.detect_for_video(image, ms)
         hands = self._hand_centers(hand_result, w, h)
+        if len(hands) < 2:
+            pose_hands = pose_wrist_centers(pose_result)
+            if not hands:
+                hands = pose_hands
+            elif pose_hands:
+                # 이미 찾은 손에서 충분히 떨어진 손목만 보완한다.
+                hands += [p for p in pose_hands
+                          if min(((p[0]-q[0])**2+(p[1]-q[1])**2)**.5 for q in hands) > .10]
         hands = self.motion_tracker.detect(frame, hands)
-        self._draw_hands(frame, hand_result)
+        draw_pose_arms(frame, pose_result)
+        draw_hand_skeleton(frame, hand_result)
         draw_motion_points(frame, hands)
 
         event = self.engine.update(frame, hands, now)
@@ -406,6 +438,8 @@ class FactoryApp(tk.Tk):
             self.writer.release()
         if self.hand_lm is not None:
             self.hand_lm.close()
+        if self.pose_lm is not None:
+            self.pose_lm.close()
         if self.cap is not None:
             self.cap.release()
         self.destroy()
