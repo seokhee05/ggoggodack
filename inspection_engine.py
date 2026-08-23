@@ -27,11 +27,23 @@ THRESHOLDS: Dict[str, Dict[str, float]] = {
     "lift_visual": {"coverage": .40, "travel": .52, "span": .20},
     "edge_check": {"coverage": .45, "travel": .62, "span": .24},
     "two_hand_operate": {"two": .28, "pair_span": .09, "travel": .34},
-    "peel": {"two": .30, "pair_peak": .55, "pair_gain": .18,
-             "travel": .60, "span": .22},
+    "peel": {"two": .30, "pair_peak": .45, "pair_gain": .14,
+             "travel": .70, "span": .28},
+    # tap_ratio: 노이즈 블롭이 두드림으로 오인되지 않도록 공구가 실제로
+    # 보일 때만 두드림을 인정한다.
     "driver": {"coverage": .25, "tool_ratio": .0012, "tool_travel": .035,
-               "tap_swings": 3, "tap_amplitude": .02},
+               "tap_swings": 4, "tap_amplitude": .02, "tap_ratio": .0008},
 }
+
+
+def _why(primary: bool, primary_name: str,
+         fallback: bool, fallback_name: str) -> str:
+    """어느 조건으로 통과했는지 근거 앞에 표시해 임계값 튜닝을 돕는다."""
+    if primary:
+        return primary_name
+    if fallback:
+        return fallback_name
+    return "미충족"
 
 
 @dataclass(frozen=True)
@@ -202,31 +214,40 @@ class ActionRecognizer:
         if detector == "driver":
             screwing = (m.coverage >= t["coverage"] and m.tool_peak >= t["tool_ratio"]
                         and m.tool_travel >= t["tool_travel"])
-            # 망치로 두드리는 동작도 같은 2Point 확인 행동으로 인정한다.
+            # 망치로 두드리는 동작도 같은 2Point 확인 행동으로 인정하되,
+            # 공구가 실제로 보일 때만 센다. 색상이 거의 없으면 노이즈 블롭의
+            # 중심점 떨림이 두드림으로 오인된다.
             tapping = (m.tap_swings >= t["tap_swings"]
-                       and m.tap_amplitude >= t["tap_amplitude"])
+                       and m.tap_amplitude >= t["tap_amplitude"]
+                       and m.tool_peak >= t["tap_ratio"])
             raw = screwing or tapping
             score = max(min(1., m.tool_peak / .003) * min(1., m.tool_travel / .10),
                         min(1., m.tap_swings / 6.) * min(1., m.tap_amplitude / .06))
-            reason = (f"공구 이동 {m.tool_travel:.2f}, 색상 {m.tool_peak * 100:.2f}%, "
+            reason = (f"[{_why(screwing, 'Screw', tapping, '두드림')}] "
+                      f"공구 이동 {m.tool_travel:.2f}, 색상 {m.tool_peak * 100:.2f}%, "
                       f"두드림 {m.tap_swings}회")
         elif detector == "peel":
             # 비닐을 벗길 때는 양손 간격이 다른 동작보다 크게 벌어진다.
             spread = (m.two >= t["two"] and m.pair_peak >= t["pair_peak"]
                       and m.pair_gain >= t["pair_gain"])
-            raw = spread or (m.travel >= t["travel"] and m.span >= t["span"])
+            bulk = m.travel >= t["travel"] and m.span >= t["span"]
+            raw = spread or bulk
             score = max(min(1., m.pair_peak / .75) * min(1., m.pair_gain / .30),
                         min(1., m.travel / .90))
-            reason = f"양손 최대 간격 {m.pair_peak:.2f}, 증가폭 {m.pair_gain:.2f}"
+            reason = (f"[{_why(spread, '양손벌림', bulk, '이동량')}] "
+                      f"양손 최대 간격 {m.pair_peak:.2f}, 증가폭 {m.pair_gain:.2f}, "
+                      f"이동 {m.travel:.2f}")
         elif detector == "cover_move":
             # 덮개가 어느 쪽으로 열리든 팔이 곧게 뻗는 동작으로 잡는다.
             reaching = m.extension >= t["extension"] and m.travel >= t["extension_travel"]
-            raw = reaching or (m.coverage >= t["coverage"]
-                               and m.travel >= t["travel"] and m.span >= t["span"])
+            bulk = (m.coverage >= t["coverage"]
+                    and m.travel >= t["travel"] and m.span >= t["span"])
+            raw = reaching or bulk
             score = max(min(1., m.extension / .98) * min(1., m.travel / .50),
                         min(1., m.travel / .80) * min(1., m.span / .32))
             side = "화면 왼쪽" if m.reach < 0 else "화면 오른쪽"
-            reason = f"팔 펴짐 {m.extension:.2f}({side} 방향), 이동 {m.travel:.2f}"
+            reason = (f"[{_why(reaching, '팔뻗음', bulk, '이동량')}] "
+                      f"팔 펴짐 {m.extension:.2f}({side} 방향), 이동 {m.travel:.2f}")
         elif detector == "two_hand_operate":
             raw = (m.two >= t["two"] and m.pair_span >= t["pair_span"]
                    and m.travel >= t["travel"])
