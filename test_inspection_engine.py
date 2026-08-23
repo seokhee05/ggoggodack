@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+import inspection_engine
 from inspection_engine import (OFFICIAL_STEPS, THRESHOLDS, ActionRecognizer,
                                InspectionEngine, WindowMetrics)
 
@@ -84,25 +85,40 @@ def test_engine_records_cover_direction():
     assert engine.cover_sides["box_open"] == "화면 왼쪽"
 
 
-def test_opposite_cover_direction_raises_guidance():
-    """열 때와 닫을 때 방향이 다르면 확인 지침을 남긴다."""
+def test_open_and_close_opposite_directions_are_normal():
+    """여는 방향과 닫는 방향이 반대인 것은 정상이므로 경고하지 않는다.
+
+    한쪽으로 당겨 열고 반대로 밀어 닫는 것이 보통이다. 실제 영상에서도
+    왼쪽으로 열고 오른쪽으로 닫는 정상 작업이 확인되었다.
+    """
     engine = InspectionEngine()
     engine.start("TEST", 0.)
     engine.recognizer.last_cover_side = "화면 왼쪽"
     engine._note_cover_side(OFFICIAL_STEPS[0])
     engine.recognizer.last_cover_side = "화면 오른쪽"
     engine._note_cover_side(OFFICIAL_STEPS[-1])
-    kinds = [w["type"] for w in engine.warnings]
-    assert "COVER_DIRECTION" in kinds
+    assert not [w for w in engine.warnings if w["type"] == "COVER_DIRECTION"]
+    assert engine.cover_sides == {"box_open": "화면 왼쪽",
+                                  "box_close": "화면 오른쪽"}
 
 
-def test_same_cover_direction_is_silent():
+def test_expected_cover_side_flags_mismatch(monkeypatch):
+    """기대 방향을 지정한 경우에만 반대로 연 박스를 표시한다."""
+    monkeypatch.setattr(inspection_engine, "EXPECTED_COVER_SIDE", "화면 왼쪽")
     engine = InspectionEngine()
     engine.start("TEST", 0.)
-    for step in (OFFICIAL_STEPS[0], OFFICIAL_STEPS[-1]):
-        engine.recognizer.last_cover_side = "화면 왼쪽"
-        engine._note_cover_side(step)
-    assert not [w for w in engine.warnings if w["type"] == "COVER_DIRECTION"]
+    engine.recognizer.last_cover_side = "화면 오른쪽"
+    engine._note_cover_side(OFFICIAL_STEPS[0])
+    assert [w for w in engine.warnings if w["type"] == "COVER_DIRECTION"]
+
+
+def test_expected_cover_side_silent_when_matching(monkeypatch):
+    monkeypatch.setattr(inspection_engine, "EXPECTED_COVER_SIDE", "화면 왼쪽")
+    engine = InspectionEngine()
+    engine.start("TEST", 0.)
+    engine.recognizer.last_cover_side = "화면 왼쪽"
+    engine._note_cover_side(OFFICIAL_STEPS[0])
+    assert not engine.warnings
 
 
 def test_finish_marks_incomplete_steps_missing():

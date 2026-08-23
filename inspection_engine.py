@@ -20,6 +20,11 @@ MIN_SAMPLES = 15
 # 한 프레임에 손이 이만큼 넘게 튀면 추적이 바뀐 것으로 보고 이동량에서 제외한다.
 MAX_STEP = 0.18
 
+# 박스를 항상 같은 방향으로 놓고 작업한다면 "화면 왼쪽" 또는 "화면 오른쪽"을
+# 지정한다. 지정하면 다른 방향으로 연 박스에 확인 지침이 붙는다. 빈 값이면
+# 방향을 기록만 하고 경고하지 않는다.
+EXPECTED_COVER_SIDE = ""
+
 # 현장 튜닝 지점. 각 detector의 통과 조건과 점수 정규화 기준을 모아 둔다.
 THRESHOLDS: Dict[str, Dict[str, float]] = {
     "cover_move": {"extension": .93, "extension_travel": .25,
@@ -398,11 +403,15 @@ class InspectionEngine:
                 "reason": reason, "score": round(score, 3)}
 
     def _note_cover_side(self, definition: StepDefinition) -> None:
-        """덮개 여닫이 방향을 기록하고 반대로 열린 경우 지침을 남긴다.
+        """덮개를 연 방향을 기록하고 기준과 다르면 지침을 남긴다.
 
-        덮개가 어느 쪽으로 열리는지는 작업대 배치에 따라 달라진다. 방향
-        자체는 불량이 아니므로 통과시키되, 열 때와 닫을 때 방향이 다르면
-        확인이 필요한 사항으로 남긴다.
+        여는 방향과 닫는 방향은 서로 반대인 것이 정상이므로(한쪽으로 당겨
+        열고 반대로 밀어 닫는다) 둘을 비교하지 않는다. 판정 자체는 팔이
+        펴지는 정도로 하므로 박스가 어느 방향으로 놓여도 동작하고, 방향은
+        검토용으로 결과에 남긴다.
+
+        작업대 배치가 정해져 있어 특정 방향을 기대한다면 EXPECTED_COVER_SIDE를
+        설정한다. 그 경우에만 다른 방향으로 연 박스에 확인 지침이 붙는다.
         """
         if definition.detector != "cover_move":
             return
@@ -410,14 +419,14 @@ class InspectionEngine:
         if not side:
             return
         self.cover_sides[definition.id] = side
-        opened = self.cover_sides.get("box_open")
-        closed = self.cover_sides.get("box_close")
-        if opened and closed and opened != closed:
+        if (definition.id == "box_open" and EXPECTED_COVER_SIDE
+                and side != EXPECTED_COVER_SIDE):
             self.warnings.append({
                 "time_seconds": round(self.step_started_time - self.started_monotonic, 2),
                 "type": "COVER_DIRECTION",
-                "message": f"덮개를 {opened} 방향으로 열고 {closed} 방향으로 닫았습니다. "
-                           f"덮개 방향과 보호망 정렬을 확인하세요.",
+                "message": f"덮개를 기준({EXPECTED_COVER_SIDE})과 반대인 {side} "
+                           f"방향으로 열었습니다. 박스 배치와 보호망 정렬을 "
+                           f"확인하세요.",
                 "expected": definition.label,
             })
 
