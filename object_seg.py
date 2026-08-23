@@ -116,7 +116,9 @@ def segment_tool(frame: np.ndarray,
             best_area = area
             best_index = index
 
-    segment = ToolSegment(area_ratio=cv2.countNonZero(mask) / SEG_AREA)
+    # 유효한 덩어리가 없으면 면적을 0으로 둔다. 마스크 전체의 비율을 쓰면
+    # 흩어진 색상 노이즈가 공구 신호로 잡혀 연결요소로 거른 의미가 없어진다.
+    segment = ToolSegment()
     if best_index < 0:
         return segment
 

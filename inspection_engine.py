@@ -33,14 +33,18 @@ THRESHOLDS: Dict[str, Dict[str, float]] = {
     "lift_visual": {"coverage": .40, "travel": .52, "span": .20},
     "edge_check": {"coverage": .45, "travel": .62, "span": .24},
     "two_hand_operate": {"two": .28, "pair_span": .09, "travel": .34},
-    # vinyl_*: 빛반사로 분리한 비닐 덩어리의 면적·감소폭·이탈 거리.
+    # vinyl_*: 실측값 기준. 작업대에는 상시 반사물(비닐 안감, 메쉬 바구니)이
+    # 있어 면적과 이탈 거리는 늘 크게 나온다. 실제로 벗겨낼 때만 크게 줄어드는
+    # 감소폭(vinyl_drop)이 유일하게 판별력 있는 신호다.
+    # 실측: 벗김 -11.4%, -9.2% / 벗기지 않음 -0.9%
     "peel": {"two": .30, "pair_peak": .45, "pair_gain": .14,
-             "vinyl_ratio": .010, "vinyl_drop": .006, "vinyl_spread": .18},
-    # tool_clear·grip: 노이즈 블롭이 두드림으로 오인되지 않도록, 공구가
-    # 뚜렷하게 보이고 자루를 쥔 손 모양이 확인될 때만 두드림을 인정한다.
+             "vinyl_ratio": .05, "vinyl_drop": .05},
+    # 실측 기준. 공구는 제품당 한 번, 짧게만 보인다. 공구가 보인 구간의
+    # tool_clear는 0.013~0.039이고 나머지 구간은 정확히 0이므로 0.010이
+    # 공구 유무를 깨끗하게 가른다. 2Point는 그 구간 안의 스윙 2회 이상으로
+    # 확인한다(실측 2~3회, 공구 없는 구간 0회).
     "driver": {"coverage": .25, "tool_ratio": .0012, "tool_travel": .035,
-               "tap_swings": 4, "tap_amplitude": .02,
-               "tool_clear": .25, "grip": .50},
+               "tool_clear": .010, "tap_swings": 2, "tap_amplitude": .02},
 }
 
 
@@ -69,7 +73,7 @@ def _build_official_steps() -> List[StepDefinition]:
         steps += [
             StepDefinition(f"item{n}_visual", f"제품 {n}. 들어 올려 외관·흔들림 확인", "lift_visual", 1, 1.5),
             StepDefinition(f"item{n}_unwrap", f"제품 {n}. 비닐 벗기기", "peel", 1, 1.),
-            StepDefinition(f"item{n}_driver", f"제품 {n}. Driver Screw 2Point 확인", "driver", 2, 1.),
+            StepDefinition(f"item{n}_driver", f"제품 {n}. Driver Screw 2Point 확인", "driver", 1, 1.),
             StepDefinition(f"item{n}_operate", f"제품 {n}. 뒤집어 Knob·Hinge 작동 확인", "two_hand_operate", 1, 1.5),
             StepDefinition(f"item{n}_under", f"제품 {n}. Damper·Rib·이음부·Gap 확인", "edge_check", 1, 1.5),
             StepDefinition(f"item{n}_return", f"제품 {n}. 포장 후 박스에 반환", "large_move", 1, 1.2),
@@ -161,6 +165,7 @@ class ActionRecognizer:
         self.last_tool = ToolSegment()
         self.last_vinyl = VinylSegment()
         self.last_cover_side = ""
+        self.last_metrics = WindowMetrics()
 
     def clear_window(self) -> None:
         self.samples.clear()
@@ -244,25 +249,26 @@ class ActionRecognizer:
         if len(samples) < MIN_SAMPLES:
             return False, 0., "동작을 관찰하는 중"
         m = self._metrics(samples)
+        self.last_metrics = m
         t = THRESHOLDS.get(detector, THRESHOLDS["large_move"])
 
         if detector == "driver":
-            screwing = (m.coverage >= t["coverage"] and m.tool_peak >= t["tool_ratio"]
-                        and m.tool_travel >= t["tool_travel"])
-            # 망치로 두드리는 동작도 같은 2Point 확인 행동으로 인정한다.
-            # 세그멘테이션으로 분리한 공구가 실제로 뚜렷하게 보이고, 자루를 쥔
-            # 손 모양이 확인될 때만 센다. 노션 기준의 "잘보이는 경우 한해서".
-            tapping = (m.tap_swings >= t["tap_swings"]
-                       and m.tap_amplitude >= t["tap_amplitude"]
-                       and m.tool_clear >= t["tool_clear"]
-                       and m.grip >= t["grip"])
-            raw = screwing or tapping
-            score = max(min(1., m.tool_peak / .003) * min(1., m.tool_travel / .10),
-                        min(1., m.tap_swings / 6.) * min(1., m.tap_amplitude / .06)
-                        * min(1., m.grip / .75))
-            reason = (f"[{_why(screwing, 'Screw', tapping, '두드림')}] "
-                      f"공구 이동 {m.tool_travel:.2f}, 노출 {m.tool_clear * 100:.0f}%, "
-                      f"그립 {m.grip:.2f}, 두드림 {m.tap_swings}회")
+            # 세그멘테이션으로 분리한 공구가 실제로 보인 구간에서만 판정한다.
+            # 노션 기준의 "잘보이는 경우 한해서 진행".
+            seen = (m.coverage >= t["coverage"] and m.tool_peak >= t["tool_ratio"]
+                    and m.tool_clear >= t["tool_clear"])
+            moving = m.tool_travel >= t["tool_travel"]
+            # 2Point: 공구 머리가 두 번 이상 방향을 바꿔야 한다. Driver를
+            # 돌리든 망치로 두드리든 점검 지점마다 한 번씩 움직임이 생긴다.
+            two_points = (m.tap_swings >= t["tap_swings"]
+                          and m.tap_amplitude >= t["tap_amplitude"])
+            raw = seen and moving and two_points
+            score = (min(1., m.tool_clear / .03) * min(1., m.tool_travel / .30)
+                     * min(1., m.tap_swings / 3.))
+            reason = (f"[{'2Point' if raw else '미충족'}] "
+                      f"공구 이동 {m.tool_travel:.2f}, 크기 {m.tool_peak * 100:.2f}%, "
+                      f"노출 {m.tool_clear * 100:.1f}%, 그립 {m.grip:.2f}, "
+                      f"스윙 {m.tap_swings}회")
         elif detector == "peel":
             # 비닐을 벗길 때는 양손 간격이 다른 동작보다 크게 벌어진다.
             spread = (m.two >= t["two"] and m.pair_peak >= t["pair_peak"]
@@ -270,11 +276,10 @@ class ActionRecognizer:
             # 빛반사로 분리한 비닐 덩어리가 본체에서 떨어지거나 화면에서
             # 줄어들면 실제로 벗겨낸 것으로 본다.
             stripped = (m.vinyl_ratio >= t["vinyl_ratio"]
-                        and (m.vinyl_drop >= t["vinyl_drop"]
-                             or m.vinyl_spread >= t["vinyl_spread"]))
+                        and m.vinyl_drop >= t["vinyl_drop"])
             raw = spread or stripped
             score = max(min(1., m.pair_peak / .75) * min(1., m.pair_gain / .30),
-                        min(1., m.vinyl_drop / .04) * min(1., m.vinyl_ratio / .05))
+                        min(1., m.vinyl_drop / .12))
             reason = (f"[{_why(spread, '양손벌림', stripped, '비닐분리')}] "
                       f"양손 간격 {m.pair_peak:.2f}(+{m.pair_gain:.2f}), "
                       f"비닐 {m.vinyl_ratio * 100:.1f}%(-{m.vinyl_drop * 100:.1f}%), "
