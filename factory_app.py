@@ -23,6 +23,7 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
+from object_seg import best_grip, draw_box, draw_point
 from motion_tracker import (
     WorkerMotionTracker, arm_metrics, draw_hand_skeleton, draw_motion_points,
     draw_pose_arms, merge_hand_sources,
@@ -307,13 +308,22 @@ class FactoryApp(tk.Tk):
 
         # 판정은 오버레이가 없는 원본 프레임으로 한다. 스켈레톤 선 색이 공구
         # 색상 검출 범위와 겹쳐 오검출을 만들기 때문이다.
-        event = self.engine.update(frame, hands, now, arm_metrics(pose_result))
+        event = self.engine.update(frame, hands, now, arm_metrics(pose_result),
+                                   best_grip(hand_result))
         if self.engine.active and self.writer is not None:
             self.writer.write(frame)
 
         draw_pose_arms(frame, pose_result)
         draw_hand_skeleton(frame, hand_result)
         draw_motion_points(frame, hands)
+        tool = self.engine.recognizer.last_tool
+        vinyl = self.engine.recognizer.last_vinyl
+        if tool.found:
+            draw_box(frame, tool.box,
+                     f"TOOL {'CLEAR' if tool.clear else 'DIM'}", (60, 200, 255))
+            draw_point(frame, tool.head, "HEAD", (60, 200, 255))
+        if vinyl.found:
+            draw_box(frame, vinyl.box, f"VINYL x{vinyl.blobs}", (240, 160, 255))
 
         if event["event"] != self.last_event:
             if event["event"] == "warning":

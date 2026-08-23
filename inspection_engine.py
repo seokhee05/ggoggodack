@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
-import cv2
 import numpy as np
+
+from object_seg import ToolSegment, VinylSegment, segment_tool, segment_vinyl
 
 Point = Tuple[float, float]
 
@@ -27,12 +28,14 @@ THRESHOLDS: Dict[str, Dict[str, float]] = {
     "lift_visual": {"coverage": .40, "travel": .52, "span": .20},
     "edge_check": {"coverage": .45, "travel": .62, "span": .24},
     "two_hand_operate": {"two": .28, "pair_span": .09, "travel": .34},
+    # vinyl_*: 빛반사로 분리한 비닐 덩어리의 면적·감소폭·이탈 거리.
     "peel": {"two": .30, "pair_peak": .45, "pair_gain": .14,
-             "travel": .70, "span": .28},
-    # tap_ratio: 노이즈 블롭이 두드림으로 오인되지 않도록 공구가 실제로
-    # 보일 때만 두드림을 인정한다.
+             "vinyl_ratio": .010, "vinyl_drop": .006, "vinyl_spread": .18},
+    # tool_clear·grip: 노이즈 블롭이 두드림으로 오인되지 않도록, 공구가
+    # 뚜렷하게 보이고 자루를 쥔 손 모양이 확인될 때만 두드림을 인정한다.
     "driver": {"coverage": .25, "tool_ratio": .0012, "tool_travel": .035,
-               "tap_swings": 4, "tap_amplitude": .02, "tap_ratio": .0008},
+               "tap_swings": 4, "tap_amplitude": .02,
+               "tool_clear": .25, "grip": .50},
 }
 
 
@@ -81,6 +84,13 @@ class MotionSample:
     tool_center: Optional[Point]
     extension: float
     reach: float
+    # 세그멘테이션에서 얻은 값들
+    tool_head: Optional[Point] = None
+    tool_clear: bool = False
+    vinyl_ratio: float = 0.
+    vinyl_blobs: int = 0
+    vinyl_spread: float = 0.
+    grip: float = 0.
 
 
 @dataclass
@@ -105,6 +115,7 @@ class InspectionResult:
     checklist: List[Dict]
     warnings: List[Dict]
     video: str
+    cover_directions: Dict[str, str] = field(default_factory=dict)
     reference_workflow: str = "직원 기준영상 기반: 박스 열기 + 제품 3개 반복 검사 + 박스 닫기"
     prototype_notice: str = "검사 행동과 순서를 확인하는 프로토타입이며 실제 부품 양불량은 REVIEW 대상입니다."
 
@@ -126,46 +137,51 @@ class WindowMetrics:
     tap_amplitude: float = 0.
     extension: float = 0.
     reach: float = 0.
+    tool_clear: float = 0.       # 공구가 뚜렷하게 보인 프레임 비율
+    grip: float = 0.             # 자루를 쥔 손 모양의 최대 강도
+    vinyl_ratio: float = 0.      # 비닐 덩어리 최대 면적 비율
+    vinyl_drop: float = 0.       # 비닐 면적이 줄어든 폭 = 벗겨낸 정도
+    vinyl_spread: float = 0.     # 비닐 덩어리가 본체에서 떨어진 정도
 
 
 class ActionRecognizer:
     def __init__(self) -> None:
         self.samples: Deque[MotionSample] = deque(maxlen=WINDOW_MAX_SAMPLES)
+        self.last_tool = ToolSegment()
+        self.last_vinyl = VinylSegment()
+        self.last_cover_side = ""
 
     def reset(self) -> None:
         self.samples.clear()
+        self.last_tool = ToolSegment()
+        self.last_vinyl = VinylSegment()
+        self.last_cover_side = ""
 
     def clear_window(self) -> None:
         self.samples.clear()
 
-    @staticmethod
-    def _tool_signal(frame) -> Tuple[float, Optional[Point]]:
-        """주황색 계열 공구(Driver·황동 망치) 픽셀 비율과 중심을 구한다."""
-        small = cv2.resize(frame, (320, 180))
-        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array([5, 105, 95]), np.array([28, 255, 255]))
-        mask[:48] = 0
-        count = cv2.countNonZero(mask)
-        ratio = count / float(mask.size)
-        if count < 10:
-            return ratio, None
-        moments = cv2.moments(mask, True)
-        if not moments["m00"]:
-            return ratio, None
-        return ratio, (moments["m10"] / moments["m00"] / 320.,
-                       moments["m01"] / moments["m00"] / 180.)
-
     def update(self, frame, hands: Sequence[Point], t: float,
-               arms: Optional[Dict[str, Dict[str, float]]] = None) -> None:
-        ratio, center = self._tool_signal(frame)
+               arms: Optional[Dict[str, Dict[str, float]]] = None,
+               grip: float = 0.) -> None:
+        tool = segment_tool(frame, hands)
+        vinyl = segment_vinyl(frame)
+        # 마지막 세그멘테이션 결과는 화면 표시에 재사용한다.
+        self.last_tool = tool
+        self.last_vinyl = vinyl
         best_arm = max(arms.values(), key=lambda a: a["extension"]) if arms else None
         self.samples.append(MotionSample(
             t=t,
             hands=tuple(hands[:2]),
-            tool_ratio=ratio,
-            tool_center=center,
+            tool_ratio=tool.area_ratio,
+            tool_center=tool.center,
             extension=best_arm["extension"] if best_arm else 0.,
             reach=best_arm["reach"] if best_arm else 0.,
+            tool_head=tool.head,
+            tool_clear=tool.clear,
+            vinyl_ratio=vinyl.area_ratio,
+            vinyl_blobs=vinyl.blobs,
+            vinyl_spread=vinyl.spread,
+            grip=grip,
         ))
         while self.samples and t - self.samples[0].t > WINDOW_SECONDS:
             self.samples.popleft()
@@ -192,13 +208,27 @@ class ActionRecognizer:
         tool = np.asarray([x.tool_center for x in samples if x.tool_center], np.float32)
         if len(tool) > 1:
             m.tool_travel = float(np.linalg.norm(np.diff(tool, axis=0), axis=1).sum())
-            # 두드림은 공구 머리의 y좌표가 위아래로 반복 반전하는 것으로 본다.
-            dy = np.diff(tool[:, 1])
+        # 두드림은 공구 머리가 위아래로 반복 반전하는 것으로 본다. 자루를 쥔
+        # 손보다 머리 쪽 진폭이 크므로 머리 좌표를 우선 사용한다.
+        head = np.asarray([x.tool_head for x in samples if x.tool_head], np.float32)
+        track = head if len(head) > 1 else tool
+        if len(track) > 1:
+            dy = np.diff(track[:, 1])
             significant = dy[np.abs(dy) > .004]
             if len(significant) > 1:
                 m.tap_swings = int(np.count_nonzero(np.diff(np.sign(significant))))
-                m.tap_amplitude = float(np.ptp(tool[:, 1]))
+                m.tap_amplitude = float(np.ptp(track[:, 1]))
         m.tool_peak = max((x.tool_ratio for x in samples), default=0.)
+        m.tool_clear = sum(x.tool_clear for x in samples) / len(samples)
+        m.grip = max((x.grip for x in samples), default=0.)
+
+        vinyl = np.asarray([x.vinyl_ratio for x in samples], np.float32)
+        if len(vinyl) > 1:
+            m.vinyl_ratio = float(vinyl.max())
+            # 비닐을 벗겨 치우면 화면 안 비닐 면적이 최고점에서 줄어든다.
+            peak_at = int(np.argmax(vinyl))
+            m.vinyl_drop = float(vinyl[peak_at] - vinyl[peak_at:].min())
+        m.vinyl_spread = max((x.vinyl_spread for x in samples), default=0.)
 
         m.extension = max((x.extension for x in samples), default=0.)
         m.reach = next((x.reach for x in samples if x.extension == m.extension), 0.)
@@ -214,29 +244,36 @@ class ActionRecognizer:
         if detector == "driver":
             screwing = (m.coverage >= t["coverage"] and m.tool_peak >= t["tool_ratio"]
                         and m.tool_travel >= t["tool_travel"])
-            # 망치로 두드리는 동작도 같은 2Point 확인 행동으로 인정하되,
-            # 공구가 실제로 보일 때만 센다. 색상이 거의 없으면 노이즈 블롭의
-            # 중심점 떨림이 두드림으로 오인된다.
+            # 망치로 두드리는 동작도 같은 2Point 확인 행동으로 인정한다.
+            # 세그멘테이션으로 분리한 공구가 실제로 뚜렷하게 보이고, 자루를 쥔
+            # 손 모양이 확인될 때만 센다. 노션 기준의 "잘보이는 경우 한해서".
             tapping = (m.tap_swings >= t["tap_swings"]
                        and m.tap_amplitude >= t["tap_amplitude"]
-                       and m.tool_peak >= t["tap_ratio"])
+                       and m.tool_clear >= t["tool_clear"]
+                       and m.grip >= t["grip"])
             raw = screwing or tapping
             score = max(min(1., m.tool_peak / .003) * min(1., m.tool_travel / .10),
-                        min(1., m.tap_swings / 6.) * min(1., m.tap_amplitude / .06))
+                        min(1., m.tap_swings / 6.) * min(1., m.tap_amplitude / .06)
+                        * min(1., m.grip / .75))
             reason = (f"[{_why(screwing, 'Screw', tapping, '두드림')}] "
-                      f"공구 이동 {m.tool_travel:.2f}, 색상 {m.tool_peak * 100:.2f}%, "
-                      f"두드림 {m.tap_swings}회")
+                      f"공구 이동 {m.tool_travel:.2f}, 노출 {m.tool_clear * 100:.0f}%, "
+                      f"그립 {m.grip:.2f}, 두드림 {m.tap_swings}회")
         elif detector == "peel":
             # 비닐을 벗길 때는 양손 간격이 다른 동작보다 크게 벌어진다.
             spread = (m.two >= t["two"] and m.pair_peak >= t["pair_peak"]
                       and m.pair_gain >= t["pair_gain"])
-            bulk = m.travel >= t["travel"] and m.span >= t["span"]
-            raw = spread or bulk
+            # 빛반사로 분리한 비닐 덩어리가 본체에서 떨어지거나 화면에서
+            # 줄어들면 실제로 벗겨낸 것으로 본다.
+            stripped = (m.vinyl_ratio >= t["vinyl_ratio"]
+                        and (m.vinyl_drop >= t["vinyl_drop"]
+                             or m.vinyl_spread >= t["vinyl_spread"]))
+            raw = spread or stripped
             score = max(min(1., m.pair_peak / .75) * min(1., m.pair_gain / .30),
-                        min(1., m.travel / .90))
-            reason = (f"[{_why(spread, '양손벌림', bulk, '이동량')}] "
-                      f"양손 최대 간격 {m.pair_peak:.2f}, 증가폭 {m.pair_gain:.2f}, "
-                      f"이동 {m.travel:.2f}")
+                        min(1., m.vinyl_drop / .04) * min(1., m.vinyl_ratio / .05))
+            reason = (f"[{_why(spread, '양손벌림', stripped, '비닐분리')}] "
+                      f"양손 간격 {m.pair_peak:.2f}(+{m.pair_gain:.2f}), "
+                      f"비닐 {m.vinyl_ratio * 100:.1f}%(-{m.vinyl_drop * 100:.1f}%), "
+                      f"이탈 {m.vinyl_spread:.2f}")
         elif detector == "cover_move":
             # 덮개가 어느 쪽으로 열리든 팔이 곧게 뻗는 동작으로 잡는다.
             reaching = m.extension >= t["extension"] and m.travel >= t["extension_travel"]
@@ -246,6 +283,7 @@ class ActionRecognizer:
             score = max(min(1., m.extension / .98) * min(1., m.travel / .50),
                         min(1., m.travel / .80) * min(1., m.span / .32))
             side = "화면 왼쪽" if m.reach < 0 else "화면 오른쪽"
+            self.last_cover_side = side
             reason = (f"[{_why(reaching, '팔뻗음', bulk, '이동량')}] "
                       f"팔 펴짐 {m.extension:.2f}({side} 방향), 이동 {m.travel:.2f}")
         elif detector == "two_hand_operate":
@@ -286,6 +324,7 @@ class InspectionEngine:
         self.step_started_time = 0.
         self.started_iso = ""
         self.last_warning_time = -999.
+        self.cover_sides: Dict[str, str] = {}
 
     def start(self, barcode: str, now: float) -> None:
         self.active = True
@@ -296,6 +335,7 @@ class InspectionEngine:
         self.step_index = 0
         self.warnings = []
         self.last_warning_time = -999.
+        self.cover_sides = {}
         self.steps = [StepResult(x.id, x.label, required_hits=x.required_hits)
                       for x in OFFICIAL_STEPS]
         self.recognizer.reset()
@@ -309,13 +349,14 @@ class InspectionEngine:
         return self.steps[self.step_index] if self.step_index < len(self.steps) else None
 
     def update(self, frame, hands: Sequence[Point], now: float,
-               arms: Optional[Dict[str, Dict[str, float]]] = None) -> Dict:
+               arms: Optional[Dict[str, Dict[str, float]]] = None,
+               grip: float = 0.) -> Dict:
         if not self.active:
             return {"event": "idle", "message": "바코드를 스캔해 주세요.", "reason": ""}
         if self.step_index >= len(self.steps):
             return {"event": "complete", "message": "직원 기준 작업 순서가 모두 확인되었습니다.", "reason": ""}
 
-        self.recognizer.update(frame, hands, now, arms)
+        self.recognizer.update(frame, hands, now, arms, grip)
         definition = self.current_definition
         result = self.current_result
         elapsed = now - self.step_started_time
@@ -334,6 +375,7 @@ class InspectionEngine:
             if result.hits >= result.required_hits:
                 result.status = "PASS"
                 result.completed_at_seconds = round(now - self.started_monotonic, 2)
+                self._note_cover_side(definition)
                 self.step_index += 1
                 if self.step_index >= len(self.steps):
                     return {"event": "complete", "message": "모든 제품의 기준 작업이 확인되었습니다.",
@@ -355,6 +397,30 @@ class InspectionEngine:
         return {"event": "progress", "message": "확인 중: " + definition.label,
                 "reason": reason, "score": round(score, 3)}
 
+    def _note_cover_side(self, definition: StepDefinition) -> None:
+        """덮개 여닫이 방향을 기록하고 반대로 열린 경우 지침을 남긴다.
+
+        덮개가 어느 쪽으로 열리는지는 작업대 배치에 따라 달라진다. 방향
+        자체는 불량이 아니므로 통과시키되, 열 때와 닫을 때 방향이 다르면
+        확인이 필요한 사항으로 남긴다.
+        """
+        if definition.detector != "cover_move":
+            return
+        side = self.recognizer.last_cover_side
+        if not side:
+            return
+        self.cover_sides[definition.id] = side
+        opened = self.cover_sides.get("box_open")
+        closed = self.cover_sides.get("box_close")
+        if opened and closed and opened != closed:
+            self.warnings.append({
+                "time_seconds": round(self.step_started_time - self.started_monotonic, 2),
+                "type": "COVER_DIRECTION",
+                "message": f"덮개를 {opened} 방향으로 열고 {closed} 방향으로 닫았습니다. "
+                           f"덮개 방향과 보호망 정렬을 확인하세요.",
+                "expected": definition.label,
+            })
+
     def finish(self, video_path: str, now: float, forced: bool = False) -> InspectionResult:
         for step in self.steps:
             if step.status != "PASS":
@@ -369,6 +435,7 @@ class InspectionEngine:
             checklist=[asdict(step) for step in self.steps],
             warnings=list(self.warnings),
             video=video_path,
+            cover_directions=dict(self.cover_sides),
         )
         self.active = False
         return result

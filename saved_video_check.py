@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from factory_app import HAND_MODEL, POSE_MODEL, RESULTS, ensure_model, safe_name
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
 from armrest_tracker import ArmrestTracker, draw_armrest_box
+from object_seg import best_grip, draw_box, draw_point
 from motion_tracker import (
     WorkerMotionTracker, arm_metrics, draw_hand_skeleton, draw_motion_points,
     draw_pose_arms, merge_hand_sources,
@@ -148,11 +149,22 @@ def main() -> None:
         product_box, product_confidence = product_tracker.detect(frame)
         # 제품 후보 추적은 시각적 보조로 사용한다. 비닐이나 손에 가려져 제품 상자가
         # 잠시 사라져도 공식 검사 행동 분석 자체는 계속한다.
-        event = engine.update(frame, points, video_time, arm_metrics(pose_result))
+        event = engine.update(frame, points, video_time, arm_metrics(pose_result),
+                              best_grip(result))
         draw_pose_arms(frame, pose_result)
         draw_hand_skeleton(frame, result)
         draw_motion_points(frame, points)
         draw_armrest_box(frame, product_box, product_confidence)
+        # 세그멘테이션 결과를 함께 표시해 어떤 근거로 통과했는지 눈으로 본다.
+        tool = engine.recognizer.last_tool
+        vinyl = engine.recognizer.last_vinyl
+        if tool.found:
+            draw_box(frame, tool.box,
+                     f"TOOL {'CLEAR' if tool.clear else 'DIM'}", (60, 200, 255))
+            draw_point(frame, tool.head, "HEAD", (60, 200, 255))
+        if vinyl.found:
+            draw_box(frame, vinyl.box,
+                     f"VINYL x{vinyl.blobs}", (240, 160, 255))
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 108), (20, 20, 20), -1)
         cv2.putText(frame, f"SAVED VIDEO  {engine.step_index}/{len(OFFICIAL_STEPS)}  {video_time:.1f}s",
                     (15, 32), cv2.FONT_HERSHEY_SIMPLEX, .75, (255, 255, 255), 2)
