@@ -24,8 +24,8 @@ from PIL import Image, ImageTk
 
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
 from motion_tracker import (
-    WorkerMotionTracker, draw_hand_skeleton, draw_motion_points,
-    draw_pose_arms, pose_wrist_centers,
+    WorkerMotionTracker, arm_metrics, draw_hand_skeleton, draw_motion_points,
+    draw_pose_arms, merge_hand_sources,
 )
 
 
@@ -104,6 +104,7 @@ class FactoryApp(tk.Tk):
         self.last_timestamp_ms = -1
         self.engine = InspectionEngine(nominal_seconds=70.0, warning_seconds=18.0)
         self.current_video_path = ""
+        self.current_result_path = ""
         self.total = self.passed = self.failed = 0
         self.last_event = "idle"
         self.motion_tracker = WorkerMotionTracker()
@@ -264,22 +265,6 @@ class FactoryApp(tk.Tk):
         self.barcode_entry.focus_set()
         return "break"
 
-    def _hand_centers(self, result, width: int, height: int):
-        centers = []
-        for landmarks in result.hand_landmarks or []:
-            ids = (0, 5, 9, 13, 17)
-            x = sum(landmarks[i].x for i in ids) / len(ids)
-            y = sum(landmarks[i].y for i in ids) / len(ids)
-            centers.append((x, y))
-        return centers
-
-    def _draw_hands(self, frame, result):
-        h, w = frame.shape[:2]
-        for landmarks in result.hand_landmarks or []:
-            for lm in landmarks:
-                cv2.circle(frame, (int(lm.x * w), int(lm.y * h)), 2,
-                           (255, 255, 255), -1, cv2.LINE_AA)
-
     def _draw_overlay(self, frame, event):
         h, w = frame.shape[:2]
         cv2.rectangle(frame, (0, 0), (w, 96), (18, 18, 18), -1)
@@ -317,21 +302,19 @@ class FactoryApp(tk.Tk):
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         hand_result = self.hand_lm.detect_for_video(image, ms)
         pose_result = self.pose_lm.detect_for_video(image, ms)
-        hands = self._hand_centers(hand_result, w, h)
-        if len(hands) < 2:
-            pose_hands = pose_wrist_centers(pose_result)
-            if not hands:
-                hands = pose_hands
-            elif pose_hands:
-                # 이미 찾은 손에서 충분히 떨어진 손목만 보완한다.
-                hands += [p for p in pose_hands
-                          if min(((p[0]-q[0])**2+(p[1]-q[1])**2)**.5 for q in hands) > .10]
-        hands = self.motion_tracker.detect(frame, hands)
+        hands = self.motion_tracker.detect(
+            frame, merge_hand_sources(hand_result, pose_result))
+
+        # 판정은 오버레이가 없는 원본 프레임으로 한다. 스켈레톤 선 색이 공구
+        # 색상 검출 범위와 겹쳐 오검출을 만들기 때문이다.
+        event = self.engine.update(frame, hands, now, arm_metrics(pose_result))
+        if self.engine.active and self.writer is not None:
+            self.writer.write(frame)
+
         draw_pose_arms(frame, pose_result)
         draw_hand_skeleton(frame, hand_result)
         draw_motion_points(frame, hands)
 
-        event = self.engine.update(frame, hands, now)
         if event["event"] != self.last_event:
             if event["event"] == "warning":
                 self._set_status(event["message"], RED, True)
@@ -347,9 +330,6 @@ class FactoryApp(tk.Tk):
             self.last_event = event["event"]
 
         self._draw_overlay(frame, event)
-        if self.engine.active and self.writer is not None:
-            self.writer.write(frame)
-
         scale = DISPLAY_WIDTH / w
         display = cv2.resize(frame, (DISPLAY_WIDTH, int(h * scale)))
         display = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)

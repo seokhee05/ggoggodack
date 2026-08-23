@@ -18,8 +18,8 @@ from factory_app import HAND_MODEL, POSE_MODEL, RESULTS, ensure_model, safe_name
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
 from armrest_tracker import ArmrestTracker, draw_armrest_box
 from motion_tracker import (
-    WorkerMotionTracker, draw_hand_skeleton, draw_motion_points,
-    draw_pose_arms, pose_wrist_centers,
+    WorkerMotionTracker, arm_metrics, draw_hand_skeleton, draw_motion_points,
+    draw_pose_arms, merge_hand_sources,
 )
 
 
@@ -144,23 +144,11 @@ def main() -> None:
             mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp_ms)
         pose_result = pose_landmarker.detect_for_video(
             mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp_ms)
-        centers = []
-        for landmarks in result.hand_landmarks or []:
-            ids = (0, 5, 9, 13, 17)
-            centers.append((sum(landmarks[i].x for i in ids) / len(ids),
-                            sum(landmarks[i].y for i in ids) / len(ids)))
-        if len(centers) < 2:
-            pose_hands = pose_wrist_centers(pose_result)
-            if not centers:
-                centers = pose_hands
-            elif pose_hands:
-                centers += [p for p in pose_hands
-                            if min(((p[0]-q[0])**2+(p[1]-q[1])**2)**.5 for q in centers) > .10]
-        points = tracker.detect(frame, centers)
+        points = tracker.detect(frame, merge_hand_sources(result, pose_result))
         product_box, product_confidence = product_tracker.detect(frame)
         # 제품 후보 추적은 시각적 보조로 사용한다. 비닐이나 손에 가려져 제품 상자가
         # 잠시 사라져도 공식 검사 행동 분석 자체는 계속한다.
-        event = engine.update(frame, points, video_time)
+        event = engine.update(frame, points, video_time, arm_metrics(pose_result))
         draw_pose_arms(frame, pose_result)
         draw_hand_skeleton(frame, result)
         draw_motion_points(frame, points)
