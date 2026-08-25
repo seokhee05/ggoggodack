@@ -22,8 +22,9 @@ import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
 
+import panel
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
-from object_seg import best_grip, draw_box, draw_point
+from object_seg import best_grip
 from motion_tracker import (
     WorkerMotionTracker, arm_metrics, draw_hand_skeleton, draw_motion_points,
     draw_pose_arms, merge_hand_sources,
@@ -146,17 +147,6 @@ class FactoryApp(tk.Tk):
                                      font=(FONT, 17, "bold"), bg=CARD,
                                      fg=YELLOW, pady=10)
         self.status_label.pack(fill="x", padx=28, pady=(5, 5))
-
-        self.check_labels = []
-        checklist = tk.Frame(self, bg=BG)
-        checklist.pack(fill="x", padx=34, pady=3)
-        checklist.grid_columnconfigure(0, weight=1)
-        checklist.grid_columnconfigure(1, weight=1)
-        for index, step in enumerate(OFFICIAL_STEPS):
-            label = tk.Label(checklist, text=f"○ {step.label}",
-                             font=(FONT, 10), bg=BG, fg=SUB, anchor="w")
-            label.grid(row=index // 2, column=index % 2, sticky="ew", padx=5, pady=1)
-            self.check_labels.append(label)
 
         buttons = tk.Frame(self, bg=BG)
         buttons.pack(pady=8)
@@ -316,14 +306,7 @@ class FactoryApp(tk.Tk):
         draw_pose_arms(frame, pose_result)
         draw_hand_skeleton(frame, hand_result)
         draw_motion_points(frame, hands)
-        tool = self.engine.recognizer.last_tool
-        vinyl = self.engine.recognizer.last_vinyl
-        if tool.found:
-            draw_box(frame, tool.box,
-                     f"TOOL {'CLEAR' if tool.clear else 'DIM'}", (60, 200, 255))
-            draw_point(frame, tool.head, "HEAD", (60, 200, 255))
-        if vinyl.found:
-            draw_box(frame, vinyl.box, f"VINYL x{vinyl.blobs}", (240, 160, 255))
+        panel.draw_segments(frame, self.engine.recognizer)
 
         if event["event"] != self.last_event:
             if event["event"] == "warning":
@@ -340,8 +323,12 @@ class FactoryApp(tk.Tk):
             self.last_event = event["event"]
 
         self._draw_overlay(frame, event)
-        scale = DISPLAY_WIDTH / w
-        display = cv2.resize(frame, (DISPLAY_WIDTH, int(h * scale)))
+        # 저장 영상 검사와 같은 화면을 쓴다.
+        display = panel.render(frame, self.engine, event,
+                               hint="바코드 스캔 시 검사 시작")
+        scale = DISPLAY_WIDTH / panel.PANEL_WIDTH
+        display = cv2.resize(display, (DISPLAY_WIDTH,
+                                       int(panel.PANEL_HEIGHT * scale)))
         display = cv2.cvtColor(display, cv2.COLOR_BGR2RGB)
         photo = ImageTk.PhotoImage(Image.fromarray(display))
         self.video_label.configure(image=photo)
@@ -349,13 +336,7 @@ class FactoryApp(tk.Tk):
         self.after_id = self.after(1, self._loop)
 
     def _refresh_checklist(self) -> None:
-        for i, label in enumerate(self.check_labels):
-            if i < len(self.engine.steps) and self.engine.steps[i].status == "PASS":
-                label.config(text=f"● {OFFICIAL_STEPS[i].label}  완료", fg=GREEN)
-            elif self.engine.active and i == self.engine.step_index:
-                label.config(text=f"▶ {OFFICIAL_STEPS[i].label}  진행 중", fg=YELLOW)
-            else:
-                label.config(text=f"○ {OFFICIAL_STEPS[i].label}", fg=SUB)
+        """체크리스트는 매 프레임 패널에 다시 그려지므로 따로 갱신하지 않는다."""
 
     def _finish_box(self, forced: bool) -> None:
         if not self.engine.active:

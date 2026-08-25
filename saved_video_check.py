@@ -10,16 +10,15 @@ from pathlib import Path
 
 import cv2
 import mediapipe as mp
-import numpy as np
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
-from PIL import Image, ImageDraw, ImageFont
 
 from factory_app import HAND_MODEL, POSE_MODEL, RESULTS, ensure_model, safe_name
 from inspection_engine import InspectionEngine, OFFICIAL_STEPS
 from dataclasses import asdict
 from armrest_tracker import ArmrestTracker, draw_armrest_box
-from object_seg import best_grip, draw_box, draw_point
+import panel
+from object_seg import best_grip
 from motion_tracker import (
     WorkerMotionTracker, arm_metrics, draw_hand_skeleton, draw_motion_points,
     draw_pose_arms, merge_hand_sources,
@@ -38,60 +37,6 @@ def unique_result_path(barcode: str) -> Path:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = RESULTS / f"{safe_name(barcode)}_{stamp}_saved_result.json"
     return path
-
-
-def korean_font(size: int):
-    candidates = [
-        Path(r"C:\Windows\Fonts\malgun.ttf"),
-        Path(r"C:\Windows\Fonts\malgunbd.ttf"),
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return ImageFont.truetype(str(candidate), size)
-    return ImageFont.load_default()
-
-
-def checklist_display(frame, engine: InspectionEngine, event: dict):
-    """직원 기준영상의 제품별 반복 체크리스트를 표시한다."""
-    video = cv2.resize(frame, (900, 506))
-    canvas = np.full((620, 1280, 3), (16, 19, 24), dtype=np.uint8)
-    canvas[:506, :900] = video
-    panel = Image.fromarray(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(panel)
-    title_font = korean_font(25); item_font = korean_font(17); small_font = korean_font(14)
-    total = len(OFFICIAL_STEPS)
-    draw.text((925, 20), "직원 기준 작업 검사", font=title_font, fill=(245,247,250))
-    draw.text((925, 57), f"완료: {engine.step_index}/{total}", font=item_font, fill=(60,210,130))
-    pending_index = next((i for i, s in enumerate(engine.steps) if s.status != "PASS"), -1)
-    # 17개 항목 전체를 한 화면에 억지로 넣지 않고 현재 단계 주변을 표시한다.
-    start = max(0, min(pending_index - 2, total - 8)) if pending_index >= 0 else max(0, total-8)
-    y = 100
-    for index in range(start, min(total, start + 8)):
-        definition = OFFICIAL_STEPS[index]
-        status = engine.steps[index].status if index < len(engine.steps) else "WAIT"
-        if status == "PASS":
-            mark, color = "● 완료", (45,205,120)
-        elif engine.active and index == pending_index:
-            mark, color = "▶ 분석 중", (255,190,45)
-        else:
-            mark, color = "○ 탐색 중", (155,165,180)
-        draw.text((925, y), mark, font=small_font, fill=color)
-        # 번호는 mark에 이미 있으므로 긴 문구가 패널을 넘지 않도록 본문만 두 줄 처리한다.
-        label = definition.label
-        if len(label) > 24:
-            split = 24
-            draw.text((925, y+22), label[:split], font=small_font, fill=(235,238,242))
-            draw.text((925, y+42), label[split:], font=small_font, fill=(235,238,242))
-            y += 58
-        else:
-            draw.text((925, y+22), label, font=small_font, fill=(235,238,242))
-            y += 48
-    reason = event.get("reason", "")
-    draw.text((20, 530), "현재 판정 근거", font=item_font, fill=(255,195,60))
-    draw.text((20, 565), reason[:95], font=small_font, fill=(235,238,242))
-    draw.text((960, 578), "ESC: 검사 종료 및 결과 저장", font=small_font, fill=(255,145,90))
-    return cv2.cvtColor(np.asarray(panel), cv2.COLOR_RGB2BGR)
 
 
 def main() -> None:
@@ -173,15 +118,7 @@ def main() -> None:
         draw_motion_points(frame, points)
         draw_armrest_box(frame, product_box, product_confidence)
         # 세그멘테이션 결과를 함께 표시해 어떤 근거로 통과했는지 눈으로 본다.
-        tool = engine.recognizer.last_tool
-        vinyl = engine.recognizer.last_vinyl
-        if tool.found:
-            draw_box(frame, tool.box,
-                     f"TOOL {'CLEAR' if tool.clear else 'DIM'}", (60, 200, 255))
-            draw_point(frame, tool.head, "HEAD", (60, 200, 255))
-        if vinyl.found:
-            draw_box(frame, vinyl.box,
-                     f"VINYL x{vinyl.blobs}", (240, 160, 255))
+        panel.draw_segments(frame, engine.recognizer)
         cv2.rectangle(frame, (0, 0), (frame.shape[1], 108), (20, 20, 20), -1)
         cv2.putText(frame, f"SAVED VIDEO  {engine.step_index}/{len(OFFICIAL_STEPS)}  {video_time:.1f}s",
                     (15, 32), cv2.FONT_HERSHEY_SIMPLEX, .75, (255, 255, 255), 2)
@@ -201,7 +138,8 @@ def main() -> None:
             metrics_writer.writeheader()
         metrics_writer.writerow(row)
 
-        display = checklist_display(frame, engine, event)
+        display = panel.render(frame, engine, event,
+                               hint="ESC: 검사 종료 및 결과 저장")
         cv2.imshow("Saved Video Inspection - ESC to stop", display)
         if event["event"] == "complete" or cv2.waitKey(max(1, int(1000 / fps))) == 27:
             break
