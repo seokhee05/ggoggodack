@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .venv/
 .testvenv/
 pip-metadata-*/
@@ -15,3 +16,16 @@ results/
 .idea/
 .DS_Store
 Thumbs.db
+=======
+영상자료모음/
+data/origin/
+data/media/
+results/
+model/result_*.mp4
+__pycache__/
+*.pyc
+.DS_Store
+*.mp4
+*.mov
+*.zip
+>>>>>>> merge
